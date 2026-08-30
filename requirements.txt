@@ -1,0 +1,9 @@
+flask
+flask-cors
+flask-login
+flask-socketio
+gevent
+psycogreen
+psycopg2-binary
+python-dotenv
+gunicorn
