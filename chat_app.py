@@ -21,7 +21,7 @@ from db import (
     delete_forum_message_by_id, get_donator_by_id, get_forum_message_sender, init_forum_messages_table, get_channel_history, save_channel_message,
     init_intro_threads_tables, get_intro_threads, get_intro_thread_by_donator, upsert_intro_thread,
     get_intro_thread_owner, delete_intro_thread_by_id, get_intro_replies, add_intro_reply,
-    get_intro_reply_owner, delete_intro_reply_by_id
+    get_intro_reply_owner, delete_intro_reply_by_id, get_donators_by_ids
 )
 
 load_dotenv()
@@ -68,6 +68,11 @@ def load_user(donator_id):
 def unauthorized():
     return jsonify({'error': 'Login required'}), 401
 
+def _picture_path(donator):
+    if donator and donator.get('profile_picture'):
+        return f"/profile-pictures/{donator['profile_picture']}"
+    return None
+
 
 def csrf_protect(f):
     """Same Origin-check as the main API — duplicated here on purpose,
@@ -98,6 +103,10 @@ def handle_join_channel(data):
         return
     join_room(channel)
     history = get_channel_history(channel)
+
+    sender_ids = {row['sender_id'] for row in history}
+    donators = get_donators_by_ids(sender_ids)
+
     emit('channel_history', {
         'channel': channel,
         'messages': [
@@ -105,13 +114,36 @@ def handle_join_channel(data):
                 'id': row['id'],
                 'channel': row['channel'],
                 'senderID': row['sender_id'],
-                'senderName': row['sender_name'],
+                'senderName': donators.get(row['sender_id'], {}).get('name') or row['sender_name'],
+                'senderPicture': _picture_path(donators.get(row['sender_id'])),
                 'message': row['message'],
                 'timestamp': row['created_at'].isoformat()
             }
             for row in history
         ]
     })
+
+
+@socketio.on('send_channel_message')
+def handle_send_channel_message(data):
+    channel = data.get('channel')
+    message = (data.get('message') or '').strip()
+
+    if not channel or not message:
+        return
+
+    saved = save_channel_message(channel, str(current_user.id), current_user.name, message)
+    donator = get_donator_by_id(current_user.id)
+
+    emit('channel_message', {
+        'id': saved['id'],
+        'channel': saved['channel'],
+        'senderID': saved['sender_id'],
+        'senderName': (donator['name'] if donator else None) or current_user.name,
+        'senderPicture': _picture_path(donator),
+        'message': saved['message'],
+        'timestamp': saved['created_at'].isoformat()
+    }, room=channel)
 
 
 @socketio.on('leave_channel')

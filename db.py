@@ -292,3 +292,20 @@ def delete_forum_message_by_id(message_id):
     cur.close()
     conn.close()
     return deleted
+
+
+def get_donators_by_ids(donator_ids):
+    """Fetch current name/profile_picture for a set of donator ids, keyed by id as a string."""
+    if not donator_ids:
+        return {}
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, name, profile_picture FROM donators WHERE id::text = ANY(%s)",
+        (list(donator_ids),)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {str(row['id']): row for row in rows}
+
