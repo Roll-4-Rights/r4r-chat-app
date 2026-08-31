@@ -92,7 +92,7 @@ def csrf_protect(f):
 
 # ============= LIVE CHAT (SOCKET.IO) =============
 
-REACTION_EMOJIS = ['❤️', '🖤' '👍', '😂', '😮', '😢', '🎉']
+REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🎉']
 
 
 @socketio.on('connect')
@@ -392,6 +392,26 @@ def handle_delete_message(data):
 
     delete_forum_message_by_id(message_id)
     emit('message_deleted', {'id': message_id, 'channel': channel}, room=channel)
+
+
+
+    class Donator(UserMixin):
+    def __init__(self, id, name, email, is_admin=False):
+        self.id = id
+        self.name = name
+        self.email = email
+        self.is_admin = is_admin
+
+    def get_id(self):
+        return str(self.id)
+
+
+@login_manager.user_loader
+def load_user(donator_id):
+    row = get_donator_by_id(donator_id)
+    if not row:
+        return None
+    return Donator(row['id'], row['name'], row['email'], row['is_admin'])
 
 
 if __name__ == '__main__':
