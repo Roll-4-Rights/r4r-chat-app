@@ -271,3 +271,24 @@ def delete_intro_reply_by_id(reply_id):
     cur.close()
     conn.close()
     return deleted
+
+
+def get_forum_message_sender(message_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT sender_id FROM forum_messages WHERE id = %s", (message_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row['sender_id'] if row else None
+
+
+def delete_forum_message_by_id(message_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM forum_messages WHERE id = %s", (message_id,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
