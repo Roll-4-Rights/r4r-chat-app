@@ -182,10 +182,16 @@ def list_intro_threads():
         page = max(1, int(request.args.get('page', 1)))
         per_page = 10
         rows, total = get_intro_threads(page=page, per_page=per_page)
+
+        donator_ids = {str(row['donator_id']) for row in rows}
+        donators = get_donators_by_ids(donator_ids)
+
         return jsonify({
             'threads': [
                 {
-                    'id': row['id'], 'donatorId': row['donator_id'], 'author': row['author_name'],
+                    'id': row['id'], 'donatorId': row['donator_id'],
+                    'author': donators.get(str(row['donator_id']), {}).get('name') or row['author_name'],
+                    'authorPicture': _picture_path(donators.get(str(row['donator_id']))),
                     'title': row['title'], 'body': row['body'],
                     'createdAt': row['created_at'].isoformat(), 'replyCount': row['reply_count']
                 }
@@ -206,8 +212,11 @@ def get_my_intro_thread():
         row = get_intro_thread_by_donator(current_user.id)
         if not row:
             return jsonify(None), 200
+        donator = get_donator_by_id(current_user.id)
         return jsonify({
-            'id': row['id'], 'donatorId': row['donator_id'], 'author': row['author_name'],
+            'id': row['id'], 'donatorId': row['donator_id'],
+            'author': (donator['name'] if donator else None) or row['author_name'],
+            'authorPicture': _picture_path(donator),
             'title': row['title'], 'body': row['body'], 'createdAt': row['created_at'].isoformat()
         }), 200
     except Exception as e:
@@ -258,11 +267,17 @@ def list_intro_replies(thread_id):
         page = max(1, int(request.args.get('page', 1)))
         per_page = 10
         rows, total = get_intro_replies(thread_id, page=page, per_page=per_page)
+
+        donator_ids = {str(row['donator_id']) for row in rows}
+        donators = get_donators_by_ids(donator_ids)
+
         return jsonify({
             'replies': [
                 {
                     'id': row['id'], 'threadId': row['thread_id'], 'donatorId': row['donator_id'],
-                    'author': row['author_name'], 'message': row['message'],
+                    'author': donators.get(str(row['donator_id']), {}).get('name') or row['author_name'],
+                    'authorPicture': _picture_path(donators.get(str(row['donator_id']))),
+                    'message': row['message'],
                     'createdAt': row['created_at'].isoformat()
                 }
                 for row in rows
