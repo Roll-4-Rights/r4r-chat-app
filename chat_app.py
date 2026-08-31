@@ -281,5 +281,11 @@ def remove_intro_reply(reply_id):
         return jsonify({'error': str(e)}), 500
 
 
+
+@app.route('/')
+def index():
+    return jsonify({'service': 'Roll4Rights Chat', 'status': 'running'})
+
+
 if __name__ == '__main__':
     socketio.run(app, port=5001, host='0.0.0.0')
