@@ -406,33 +406,3 @@ def toggle_reaction(message_id, donator_id, emoji):
     conn.close()
     return get_reactions_for_message(message_id)
 
-
-def list_all_donators():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id, name, email, is_admin, created_at FROM donators ORDER BY created_at DESC")
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return rows
-
-
-def delete_donator_by_id(donator_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM donators WHERE id = %s", (donator_id,))
-    if not cur.fetchone():
-        cur.close()
-        conn.close()
-        return False
-
-    # Clean up their chat content too — removing someone should actually remove their mess
-    cur.execute("DELETE FROM forum_messages WHERE sender_id = %s", (str(donator_id),))
-    cur.execute("DELETE FROM intro_replies WHERE donator_id = %s", (donator_id,))
-    cur.execute("DELETE FROM intro_threads WHERE donator_id = %s", (donator_id,))  # cascades to that thread's own replies too
-    cur.execute("DELETE FROM donators WHERE id = %s", (donator_id,))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-    return True
