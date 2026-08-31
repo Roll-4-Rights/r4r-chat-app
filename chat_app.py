@@ -95,7 +95,7 @@ def csrf_protect(f):
 # ============= LIVE CHAT (SOCKET.IO) =============
 
 REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🎉']
-ADMIN_ONLY_CHANNELS = {'admin-only'}
+ADMIN_ONLY_CHANNELS = {'admin-lounge'}
 
 
 @socketio.on('connect')
