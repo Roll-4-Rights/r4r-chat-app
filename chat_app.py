@@ -22,7 +22,7 @@ from db import (
     init_intro_threads_tables, get_intro_threads, get_intro_thread_by_donator, upsert_intro_thread,
     get_intro_thread_owner, delete_intro_thread_by_id, get_intro_replies, add_intro_reply,
     get_intro_reply_owner, delete_intro_reply_by_id, get_donators_by_ids,
-    get_forum_message_sender, delete_forum_message_by_id, update_forum_message, init_message_reactions_table, 
+    get_forum_message_sender, delete_forum_message_by_id, update_forum_message, init_message_reactions_table,
     get_reactions_for_messages, toggle_reaction
 )
 
@@ -50,10 +50,11 @@ login_manager.init_app(app)
 
 
 class Donator(UserMixin):
-    def __init__(self, id, name, email):
+    def __init__(self, id, name, email, is_admin=False):
         self.id = id
         self.name = name
         self.email = email
+        self.is_admin = is_admin
 
     def get_id(self):
         return str(self.id)
@@ -64,12 +65,13 @@ def load_user(donator_id):
     row = get_donator_by_id(donator_id)
     if not row:
         return None
-    return Donator(row['id'], row['name'], row['email'])
+    return Donator(row['id'], row['name'], row['email'], row['is_admin'])
 
 
 @login_manager.unauthorized_handler
 def unauthorized():
     return jsonify({'error': 'Login required'}), 401
+
 
 def _picture_path(donator):
     if donator and donator.get('profile_picture'):
@@ -93,6 +95,7 @@ def csrf_protect(f):
 # ============= LIVE CHAT (SOCKET.IO) =============
 
 REACTION_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🎉']
+ADMIN_ONLY_CHANNELS = {'admin-only'}
 
 
 @socketio.on('connect')
@@ -128,6 +131,9 @@ def handle_join_channel(data):
     channel = data.get('channel')
     if not channel:
         return
+    if channel in ADMIN_ONLY_CHANNELS and not current_user.is_admin:
+        app.logger.warning(f"Non-admin tried to join {channel}: donator {current_user.id}")
+        return
     join_room(channel)
     history = get_channel_history(channel)
 
@@ -155,6 +161,8 @@ def handle_send_channel_message(data):
     reply_to_id = data.get('replyTo')
 
     if not channel or not message:
+        return
+    if channel in ADMIN_ONLY_CHANNELS and not current_user.is_admin:
         return
 
     saved = save_channel_message(channel, str(current_user.id), current_user.name, message, reply_to_id=reply_to_id)
@@ -198,7 +206,7 @@ def handle_delete_message(data):
 
     sender_id = get_forum_message_sender(message_id)
     if sender_id is None or sender_id != str(current_user.id):
-        return
+        return  # not their message — silently ignored, no error leaked
 
     delete_forum_message_by_id(message_id)
     emit('message_deleted', {'id': message_id, 'channel': channel}, room=channel)
@@ -215,7 +223,6 @@ def handle_toggle_reaction(data):
 
     reactions = toggle_reaction(message_id, str(current_user.id), emoji)
     emit('reactions_updated', {'id': message_id, 'channel': channel, 'reactions': reactions}, room=channel)
-
 
 
 # ============= INTRO THREADS ("Introduce Yourself") =============
@@ -373,45 +380,9 @@ def remove_intro_reply(reply_id):
         return jsonify({'error': str(e)}), 500
 
 
-
 @app.route('/')
 def index():
     return jsonify({'service': 'Roll4Rights Chat', 'status': 'running'})
-
-
-@socketio.on('delete_message')
-def handle_delete_message(data):
-    message_id = data.get('messageId')
-    channel = data.get('channel')
-    if not message_id or not channel:
-        return
-
-    sender_id = get_forum_message_sender(message_id)
-    if sender_id is None or sender_id != str(current_user.id):
-        return  # not their message — silently ignored, no error leaked
-
-    delete_forum_message_by_id(message_id)
-    emit('message_deleted', {'id': message_id, 'channel': channel}, room=channel)
-
-
-
-class Donator(UserMixin):
-def __init__(self, id, name, email, is_admin=False):
-    self.id = id
-    self.name = name
-    self.email = email
-    self.is_admin = is_admin
-
-def get_id(self):
-    return str(self.id)
-
-
-@login_manager.user_loader
-def load_user(donator_id):
-    row = get_donator_by_id(donator_id)
-    if not row:
-        return None
-    return Donator(row['id'], row['name'], row['email'], row['is_admin'])
 
 
 if __name__ == '__main__':

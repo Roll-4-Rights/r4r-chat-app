@@ -46,7 +46,7 @@ def get_db_connection():
 def get_donator_by_id(donator_id):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, email FROM donators WHERE id = %s", (donator_id,))
+    cur.execute("SELECT id, name, email, is_admin FROM donators WHERE id = %s", (donator_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
