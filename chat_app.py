@@ -18,10 +18,11 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from dotenv import load_dotenv
 
 from db import (
-    delete_forum_message_by_id, get_donator_by_id, get_forum_message_sender, init_forum_messages_table, get_channel_history, save_channel_message,
+    get_donator_by_id, init_forum_messages_table, get_channel_history, save_channel_message,
     init_intro_threads_tables, get_intro_threads, get_intro_thread_by_donator, upsert_intro_thread,
     get_intro_thread_owner, delete_intro_thread_by_id, get_intro_replies, add_intro_reply,
-    get_intro_reply_owner, delete_intro_reply_by_id, get_donators_by_ids
+    get_intro_reply_owner, delete_intro_reply_by_id, get_donators_by_ids,
+    get_forum_message_sender, delete_forum_message_by_id, update_forum_message
 )
 
 load_dotenv()
@@ -96,6 +97,25 @@ def handle_connect():
         return False
 
 
+def _format_message(row, donators):
+    sender = donators.get(row['sender_id'], {})
+    return {
+        'id': row['id'],
+        'channel': row['channel'],
+        'senderID': row['sender_id'],
+        'senderName': sender.get('name') or row['sender_name'],
+        'senderPicture': _picture_path(sender),
+        'message': row['message'],
+        'timestamp': row['created_at'].isoformat(),
+        'editedAt': row['edited_at'].isoformat() if row.get('edited_at') else None,
+        'replyTo': {
+            'id': row['reply_to_id'],
+            'senderName': row.get('reply_to_sender_name'),
+            'message': row.get('reply_to_message')
+        } if row.get('reply_to_id') else None
+    }
+
+
 @socketio.on('join_channel')
 def handle_join_channel(data):
     channel = data.get('channel')
@@ -109,41 +129,8 @@ def handle_join_channel(data):
 
     emit('channel_history', {
         'channel': channel,
-        'messages': [
-            {
-                'id': row['id'],
-                'channel': row['channel'],
-                'senderID': row['sender_id'],
-                'senderName': donators.get(row['sender_id'], {}).get('name') or row['sender_name'],
-                'senderPicture': _picture_path(donators.get(row['sender_id'])),
-                'message': row['message'],
-                'timestamp': row['created_at'].isoformat()
-            }
-            for row in history
-        ]
+        'messages': [_format_message(row, donators) for row in history]
     })
-
-
-@socketio.on('send_channel_message')
-def handle_send_channel_message(data):
-    channel = data.get('channel')
-    message = (data.get('message') or '').strip()
-
-    if not channel or not message:
-        return
-
-    saved = save_channel_message(channel, str(current_user.id), current_user.name, message)
-    donator = get_donator_by_id(current_user.id)
-
-    emit('channel_message', {
-        'id': saved['id'],
-        'channel': saved['channel'],
-        'senderID': saved['sender_id'],
-        'senderName': (donator['name'] if donator else None) or current_user.name,
-        'senderPicture': _picture_path(donator),
-        'message': saved['message'],
-        'timestamp': saved['created_at'].isoformat()
-    }, room=channel)
 
 
 @socketio.on('leave_channel')
@@ -157,21 +144,58 @@ def handle_leave_channel(data):
 def handle_send_channel_message(data):
     channel = data.get('channel')
     message = (data.get('message') or '').strip()
+    reply_to_id = data.get('replyTo')
 
     if not channel or not message:
         return
 
-    saved = save_channel_message(channel, str(current_user.id), current_user.name, message)
+    saved = save_channel_message(channel, str(current_user.id), current_user.name, message, reply_to_id=reply_to_id)
+    donator = get_donator_by_id(current_user.id)
+    donators = {str(current_user.id): donator} if donator else {}
 
-    emit('channel_message', {
-        'id': saved['id'],
-        'channel': saved['channel'],
-        'senderID': saved['sender_id'],
-        'senderName': saved['sender_name'],
-        'message': saved['message'],
-        'timestamp': saved['created_at'].isoformat()
+    emit('channel_message', _format_message(saved, donators), room=channel)
+
+
+@socketio.on('edit_message')
+def handle_edit_message(data):
+    message_id = data.get('messageId')
+    channel = data.get('channel')
+    new_text = (data.get('message') or '').strip()
+
+    if not message_id or not channel or not new_text:
+        return
+
+    sender_id = get_forum_message_sender(message_id)
+    if sender_id is None or sender_id != str(current_user.id):
+        return
+
+    updated = update_forum_message(message_id, new_text)
+    if not updated:
+        return
+
+    emit('message_edited', {
+        'id': updated['id'],
+        'channel': channel,
+        'message': updated['message'],
+        'editedAt': updated['edited_at'].isoformat()
     }, room=channel)
 
+
+@socketio.on('delete_message')
+def handle_delete_message(data):
+    message_id = data.get('messageId')
+    channel = data.get('channel')
+    if not message_id or not channel:
+        return
+
+    sender_id = get_forum_message_sender(message_id)
+    if sender_id is None or sender_id != str(current_user.id):
+        return
+
+    delete_forum_message_by_id(message_id)
+    emit('message_deleted', {'id': message_id, 'channel': channel}, room=channel)
+
+    
 
 # ============= INTRO THREADS ("Introduce Yourself") =============
 

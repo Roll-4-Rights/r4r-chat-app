@@ -66,6 +66,8 @@ def init_forum_messages_table():
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    cur.execute("ALTER TABLE forum_messages ADD COLUMN IF NOT EXISTS reply_to_id INTEGER REFERENCES forum_messages(id) ON DELETE SET NULL")
+    cur.execute("ALTER TABLE forum_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP")
     conn.commit()
     cur.close()
     conn.close()
@@ -76,10 +78,15 @@ def get_channel_history(channel, limit=100):
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, channel, sender_id, sender_name, message, created_at
-        FROM forum_messages
-        WHERE channel = %s
-        ORDER BY created_at DESC
+        SELECT
+            m.id, m.channel, m.sender_id, m.sender_name, m.message, m.created_at,
+            m.reply_to_id, m.edited_at,
+            r.sender_name AS reply_to_sender_name,
+            r.message AS reply_to_message
+        FROM forum_messages m
+        LEFT JOIN forum_messages r ON r.id = m.reply_to_id
+        WHERE m.channel = %s
+        ORDER BY m.created_at DESC
         LIMIT %s
         """,
         (channel, limit)
@@ -90,22 +97,87 @@ def get_channel_history(channel, limit=100):
     return list(reversed(rows))
 
 
-def save_channel_message(channel, sender_id, sender_name, message):
+def save_channel_message(channel, sender_id, sender_name, message, reply_to_id=None):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO forum_messages (channel, sender_id, sender_name, message)
-        VALUES (%s, %s, %s, %s)
-        RETURNING id, channel, sender_id, sender_name, message, created_at
+        INSERT INTO forum_messages (channel, sender_id, sender_name, message, reply_to_id)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id, channel, sender_id, sender_name, message, created_at, reply_to_id, edited_at
         """,
-        (channel, sender_id, sender_name, message)
+        (channel, sender_id, sender_name, message, reply_to_id)
+    )
+    row = dict(cur.fetchone())
+    conn.commit()
+
+    row['reply_to_sender_name'] = None
+    row['reply_to_message'] = None
+    if reply_to_id:
+        cur.execute("SELECT sender_name, message FROM forum_messages WHERE id = %s", (reply_to_id,))
+        parent = cur.fetchone()
+        if parent:
+            row['reply_to_sender_name'] = parent['sender_name']
+            row['reply_to_message'] = parent['message']
+
+    cur.close()
+    conn.close()
+    return row
+
+
+def update_forum_message(message_id, new_message):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE forum_messages
+        SET message = %s, edited_at = NOW()
+        WHERE id = %s
+        RETURNING id, channel, sender_id, sender_name, message, created_at, reply_to_id, edited_at
+        """,
+        (new_message, message_id)
     )
     row = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
     return row
+
+
+def get_forum_message_sender(message_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT sender_id FROM forum_messages WHERE id = %s", (message_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row['sender_id'] if row else None
+
+
+def delete_forum_message_by_id(message_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM forum_messages WHERE id = %s", (message_id,))
+    deleted = cur.rowcount > 0
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+
+
+def get_donators_by_ids(donator_ids):
+    if not donator_ids:
+        return {}
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, name, profile_picture FROM donators WHERE id::text = ANY(%s)",
+        (list(donator_ids),)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return {str(row['id']): row for row in rows}
 
 
 def init_intro_threads_tables():
@@ -271,41 +343,3 @@ def delete_intro_reply_by_id(reply_id):
     cur.close()
     conn.close()
     return deleted
-
-
-def get_forum_message_sender(message_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT sender_id FROM forum_messages WHERE id = %s", (message_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row['sender_id'] if row else None
-
-
-def delete_forum_message_by_id(message_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM forum_messages WHERE id = %s", (message_id,))
-    deleted = cur.rowcount > 0
-    conn.commit()
-    cur.close()
-    conn.close()
-    return deleted
-
-
-def get_donators_by_ids(donator_ids):
-    """Fetch current name/profile_picture for a set of donator ids, keyed by id as a string."""
-    if not donator_ids:
-        return {}
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, name, profile_picture FROM donators WHERE id::text = ANY(%s)",
-        (list(donator_ids),)
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    return {str(row['id']): row for row in rows}
-
