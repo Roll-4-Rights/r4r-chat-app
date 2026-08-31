@@ -18,7 +18,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from dotenv import load_dotenv
 
 from db import (
-    get_db_connection, get_donator_by_id, init_forum_messages_table, get_channel_history, save_channel_message,
+    get_donator_by_id, init_forum_messages_table, get_channel_history, save_channel_message,
     init_intro_threads_tables, get_intro_threads, get_intro_thread_by_donator, upsert_intro_thread,
     get_intro_thread_owner, delete_intro_thread_by_id, get_intro_replies, add_intro_reply,
     get_intro_reply_owner, delete_intro_reply_by_id

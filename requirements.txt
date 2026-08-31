@@ -7,3 +7,4 @@ psycogreen
 psycopg2-binary
 python-dotenv
 gunicorn
+packaging
