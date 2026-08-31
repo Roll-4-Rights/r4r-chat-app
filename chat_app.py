@@ -205,8 +205,10 @@ def handle_delete_message(data):
         return
 
     sender_id = get_forum_message_sender(message_id)
-    if sender_id is None or sender_id != str(current_user.id):
-        return  # not their message — silently ignored, no error leaked
+    if sender_id is None:
+        return
+    if sender_id != str(current_user.id) and not current_user.is_admin:
+        return  # not their message, and not an admin — silently ignored
 
     delete_forum_message_by_id(message_id)
     emit('message_deleted', {'id': message_id, 'channel': channel}, room=channel)
