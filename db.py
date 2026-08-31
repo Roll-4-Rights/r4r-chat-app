@@ -343,3 +343,65 @@ def delete_intro_reply_by_id(reply_id):
     cur.close()
     conn.close()
     return deleted
+
+def init_message_reactions_table():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS message_reactions (
+            id SERIAL PRIMARY KEY,
+            message_id INTEGER NOT NULL REFERENCES forum_messages(id) ON DELETE CASCADE,
+            donator_id TEXT NOT NULL,
+            emoji TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE (message_id, donator_id, emoji)
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_reactions_for_message(message_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT emoji, donator_id FROM message_reactions WHERE message_id = %s", (message_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row['emoji'], []).append(row['donator_id'])
+    return [{'emoji': emoji, 'donatorIds': ids} for emoji, ids in grouped.items()]
+
+
+def get_reactions_for_messages(message_ids):
+    """Batched version for a whole channel's history — one query instead of one per message."""
+    if not message_ids:
+        return {}
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT message_id, emoji, donator_id FROM message_reactions WHERE message_id = ANY(%s)", (list(message_ids),))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(row['message_id'], {}).setdefault(row['emoji'], []).append(row['donator_id'])
+    return {mid: [{'emoji': e, 'donatorIds': ids} for e, ids in emojis.items()] for mid, emojis in grouped.items()}
+
+
+def toggle_reaction(message_id, donator_id, emoji):
+    """Add the reaction if it's not there yet, remove it if it is. Returns the updated summary."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM message_reactions WHERE message_id = %s AND donator_id = %s AND emoji = %s", (message_id, donator_id, emoji))
+    existing = cur.fetchone()
+    if existing:
+        cur.execute("DELETE FROM message_reactions WHERE id = %s", (existing['id'],))
+    else:
+        cur.execute("INSERT INTO message_reactions (message_id, donator_id, emoji) VALUES (%s, %s, %s)", (message_id, donator_id, emoji))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return get_reactions_for_message(message_id)

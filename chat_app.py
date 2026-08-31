@@ -22,7 +22,8 @@ from db import (
     init_intro_threads_tables, get_intro_threads, get_intro_thread_by_donator, upsert_intro_thread,
     get_intro_thread_owner, delete_intro_thread_by_id, get_intro_replies, add_intro_reply,
     get_intro_reply_owner, delete_intro_reply_by_id, get_donators_by_ids,
-    get_forum_message_sender, delete_forum_message_by_id, update_forum_message
+    get_forum_message_sender, delete_forum_message_by_id, update_forum_message, init_message_reactions_table, 
+    get_reactions_for_messages, toggle_reaction
 )
 
 load_dotenv()
@@ -42,6 +43,7 @@ socketio = SocketIO(app, cors_allowed_origins=ALLOWED_ORIGINS, async_mode='geven
 
 init_forum_messages_table()
 init_intro_threads_tables()
+init_message_reactions_table()
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -90,6 +92,9 @@ def csrf_protect(f):
 
 # ============= LIVE CHAT (SOCKET.IO) =============
 
+REACTION_EMOJIS = ['❤️', '🖤' '👍', '😂', '😮', '😢', '🎉']
+
+
 @socketio.on('connect')
 def handle_connect():
     if not current_user.is_authenticated:
@@ -97,7 +102,8 @@ def handle_connect():
         return False
 
 
-def _format_message(row, donators):
+def _format_message(row, donators, reactions_by_message=None):
+    reactions_by_message = reactions_by_message or {}
     sender = donators.get(row['sender_id'], {})
     return {
         'id': row['id'],
@@ -112,7 +118,8 @@ def _format_message(row, donators):
             'id': row['reply_to_id'],
             'senderName': row.get('reply_to_sender_name'),
             'message': row.get('reply_to_message')
-        } if row.get('reply_to_id') else None
+        } if row.get('reply_to_id') else None,
+        'reactions': reactions_by_message.get(row['id'], [])
     }
 
 
@@ -126,10 +133,11 @@ def handle_join_channel(data):
 
     sender_ids = {row['sender_id'] for row in history}
     donators = get_donators_by_ids(sender_ids)
+    reactions_by_message = get_reactions_for_messages([row['id'] for row in history])
 
     emit('channel_history', {
         'channel': channel,
-        'messages': [_format_message(row, donators) for row in history]
+        'messages': [_format_message(row, donators, reactions_by_message) for row in history]
     })
 
 
@@ -195,7 +203,20 @@ def handle_delete_message(data):
     delete_forum_message_by_id(message_id)
     emit('message_deleted', {'id': message_id, 'channel': channel}, room=channel)
 
-    
+
+@socketio.on('toggle_reaction')
+def handle_toggle_reaction(data):
+    message_id = data.get('messageId')
+    channel = data.get('channel')
+    emoji = data.get('emoji')
+
+    if not message_id or not channel or emoji not in REACTION_EMOJIS:
+        return
+
+    reactions = toggle_reaction(message_id, str(current_user.id), emoji)
+    emit('reactions_updated', {'id': message_id, 'channel': channel, 'reactions': reactions}, room=channel)
+
+
 
 # ============= INTRO THREADS ("Introduce Yourself") =============
 
